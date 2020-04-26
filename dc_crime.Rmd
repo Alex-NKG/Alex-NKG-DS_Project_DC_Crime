@@ -1,0 +1,449 @@
+---
+title: "dc_crime"
+author: "YUEYANG LIU"
+date: "3/22/2020"
+output: pdf
+
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+```
+
+```{r}
+dc_crime<-read.csv("dc_crimes_search_results.csv")
+dc_crime %>% 
+  filter(`offense.text`=="homicide")
+```
+```{r}
+unique(dc_crime$offense.text)
+```
+
+```{r}
+library(lubridate)
+#https://opendata.arcgis.com/datasets/db24f3b7de994501aea97ce05a50547e_10.geojson
+dc_crime %>% 
+  mutate(REPORT_DAT=parse_datetime(as.character(dc_crime$REPORT_DAT),format = "%Y-%m-%dT%H:%M:%OSZ")) %>% 
+  select(offensegroup,offense.text,REPORT_DAT,SHIFT) %>% 
+  mutate(Month=month(REPORT_DAT)) %>% 
+  mutate(Week_day=wday(REPORT_DAT)) %>%
+  mutate(Year=year(REPORT_DAT)) %>%
+  mutate(Hour=hour(REPORT_DAT)) %>%
+  group_by(offensegroup,offense.text,Year) %>% 
+  summarise(Total=n()) %>% 
+  spread(key = "Year",value ="Total" ) %>%
+  select(-`2020`) %>% 
+  mutate(Tend_num=(`2019`-`2018`)) %>% 
+  mutate(Tend=ifelse(Tend_num >0 , "Up", "Down"))%>% 
+  rename(Group = 'offensegroup') %>% 
+  rename(Title = 'offense.text')
+  
+
+#chart by month/wday/hour/shift
+
+```
+
+```{r}
+library(ggplot2)
+dc_crime %>% 
+  mutate(REPORT_DAT=parse_datetime(as.character(dc_crime$REPORT_DAT),format = "%Y-%m-%dT%H:%M:%OSZ")) %>% 
+  mutate(Month=month(REPORT_DAT)) %>% 
+  mutate(Year=year(REPORT_DAT)) %>%
+  mutate(Day=mday(REPORT_DAT)) %>%
+  group_by(offense.text,Year,Month) %>% 
+  summarise(Total=n()) %>% 
+  mutate(Time=make_date(year = Year,month = Month)) %>% 
+  ggplot(mapping = aes(x = Time,y = Total)) + 
+    geom_point(mapping = aes(color = offense.text)) + 
+    theme_bw() + 
+
+    xlab("Time") + 
+    ylab("Total Number") + 
+    ggtitle("Crime number VS Time") + 
+    geom_smooth(mapping = aes(color = offense.text), method = lm, se = FALSE) + 
+    geom_smooth(method = lm, se = FALSE, color = "black", linetype = "dashed")+
+    scale_color_discrete(name = "Offense Type")
+  
+```
+
+```{r}
+library(plotly)
+
+dc_crime %>% 
+  mutate(REPORT_DAT=parse_datetime(as.character(dc_crime$REPORT_DAT),format = "%Y-%m-%dT%H:%M:%OSZ")) %>% 
+  mutate(Month=month(REPORT_DAT)) %>% 
+  mutate(Hour=hour(REPORT_DAT)) %>%
+  mutate(Wday=wday(REPORT_DAT,label=T)) %>%
+  
+  group_by(offense.text,Month,Wday) %>% 
+  
+  summarise(Total=n()) %>% 
+  plot_ly(x = ~Month, y = ~Wday, z = ~log(Total), color = ~offense.text)%>% 
+  add_markers()%>% 
+  layout(scene = list(xaxis = list(title = 'Month'),
+                     yaxis = list(title = 'Week day'),
+                     zaxis = list(title = 'Number by log')))
+
+
+```
+```{r}
+library(gganimate)
+dc_crime %>% 
+  mutate(REPORT_DAT=parse_datetime(as.character(dc_crime$REPORT_DAT),format = "%Y-%m-%dT%H:%M:%OSZ")) %>% 
+  mutate(Month=month(REPORT_DAT)) %>% 
+  group_by(offense.text,Month) %>% 
+  summarise(n=n()) %>% 
+  filter(Month==6) %>% 
+  plot_ly(
+    labels = ~`offense.text`, values = ~n,type = 'pie'
+
+
+  )
+
+  
+
+  
+
+```
+```{r}
+dc_crime %>% 
+    mutate(REPORT_DAT=parse_datetime(as.character(dc_crime$REPORT_DAT),format = "%Y-%m-%dT%H:%M:%OSZ")) %>% 
+    mutate(Month=month(REPORT_DAT)) %>% 
+    mutate(Year=year(REPORT_DAT)) %>%
+    mutate(Day=mday(REPORT_DAT)) %>%
+    mutate(Hour=hour(REPORT_DAT)) %>% 
+    group_by(offense.text,Year,Month) %>% 
+    summarise(Total=n()) %>% 
+    mutate(Time=make_date(year = Year,month = Month))
+```
+
+```{r}
+head(dc_crime)
+```
+
+```{r}
+
+```
+
+
+
+```{r}
+library(broom)
+library(ggplot2)
+
+
+
+```
+```{r}
+library(dplyr)
+library(geojsonio)
+library(mapview)
+library(leaflet)
+
+
+#by sector inclued different 
+dc_crime %>% 
+  group_by(sector) %>% 
+  summarise(n=n()) %>% 
+  filter(sector!='')->total_n
+
+dc_crime %>% 
+  group_by(sector,offense.text) %>% 
+  summarise(n=n()) %>% 
+  filter(sector!='') %>% 
+  spread(key ="offense.text", value = "n") %>% 
+  mutate(arson= replace_na(arson, 0))  ->split_n
+crime_by_sector<-left_join(total_n,split_n) %>% 
+  separate(sector, into = c("distrct", "sector"), sep = "D")
+
+
+crime_by_sector_labels <- sprintf(
+"
+<strong>District %s Sector %s </strong>
+<br/>
+<table>
+  <tr>
+    <th>Offense</th>
+    <th>Num</th>
+  </tr>
+  <tr>
+    <td>arson:</td>
+    <td> %s </td>
+  </tr>
+  <tr>
+    <td>assault:</td>
+    <td> %s </td>
+  </tr>
+  <tr>
+    <td>burglary:</td>
+    <td> %s </td>
+  </tr>
+  <tr>
+    <td>homicide:</td>
+    <td> %s </td>
+  </tr>
+  <tr>
+    <td>vehicle theft:</td>
+    <td> %s </td>
+  </tr>
+  <tr>
+    <td>robbery:</td>
+    <td> %s </td>
+  </tr>
+  <tr>
+    <td>sex abuse:</td>
+    <td> %s </td>
+  </tr>
+  <tr>
+    <td>theft f/auto:</td>
+    <td> %s </td>
+  </tr>
+  <tr>
+    <td>theft/other:</td>
+    <td> %s </td>
+  </tr>
+  <tr>
+    <td>Total:</td>
+    <td> %s </td>
+  </tr> 
+</table>",
+
+crime_by_sector$distrct,crime_by_sector$sector,crime_by_sector$arson,crime_by_sector$`assault w/dangerous weapon`,crime_by_sector$burglary,crime_by_sector$homicide,crime_by_sector$`motor vehicle theft`,crime_by_sector$robbery,crime_by_sector$`sex abuse`,crime_by_sector$`theft f/auto`,crime_by_sector$`theft/other`,crime_by_sector$n
+) %>% lapply(htmltools::HTML)
+
+
+
+
+police_sector_map <- geojson_read("https://opendata.arcgis.com/datasets/6ac17c2ff8cc4e20b3768dd1b98adf7a_23.geojson",  what = "sp")
+
+
+
+crime_by_secto_pal <- colorNumeric(c("green", "red"), 1000:7500)
+
+leaflet(police_sector_map ) %>%
+                addProviderTiles(providers$CartoDB.Positron,
+                                 options = providerTileOptions(minZoom=11.5, maxZoom=12)) %>%
+  #addLogo(img= "https://i.loli.net/2020/03/05/xHVmZtARacnWeJK.png",width = 250) %>% 
+                addPolygons(#stroke = T, 
+                            color = "black", 
+                            weight=1, 
+                            fillColor = ~crime_by_secto_pal(crime_by_sector$n),
+                            smoothFactor =0.7, 
+                            fillOpacity = 0.6,
+                            highlight = highlightOptions(
+                              weight = 5,
+                              color = "gray",
+                              fillOpacity = 0.4, 
+                              bringToFront = TRUE),
+                              label = crime_by_sector_labels,
+            labelOptions = labelOptions(
+                              style = list("font-weight" ="normal", 
+                                           padding = "3px 8px"),
+                              textsize = "15px",
+                              direction = "auto")
+                            
+                            ) %>% 
+  addLegend(pal = crime_by_secto_pal, values = ~crime_by_sector$n, opacity = 0.7, title = NULL,
+  position = "bottomright")
+                
+```
+```{r}
+library(lubridate)
+
+dc_crime %>% 
+  mutate(REPORT_DAT=parse_datetime(as.character(dc_crime$REPORT_DAT),format = "%Y-%m-%dT%H:%M:%OSZ")) %>% 
+  select(offensegroup,offense.text,REPORT_DAT) %>% 
+  mutate(Month=month(REPORT_DAT)) %>% 
+  mutate(Week_day=wday(REPORT_DAT)) %>%
+    mutate(Year=year(REPORT_DAT)) %>%
+    filter(Year!=2020) %>% 
+    group_by(offensegroup,offense.text,Year) %>% 
+
+  rename( Group = "offensegroup") %>% 
+  rename( Title = 'offense.text') %>% 
+
+  ggplot( mapping=aes(x=fct_rev(fct_infreq(Title)),fill=as.factor(Year)))+
+  geom_bar(stat="count",width=0.7,position='dodge')+
+  labs(x="",y="Total Number",fill = "Year") +
+  theme_bw()+
+  geom_text(stat='count',aes(label=..count..), color="black", size=3.5,position=position_dodge(width=1),vjust=0.7)+
+
+
+  coord_flip()
+
+```
+```{r}
+head(dc_crime)
+```
+```{r}
+tidy_cirme<-dc_crime %>% 
+  mutate(REPORT_DAT=parse_datetime(as.character(dc_crime$REPORT_DAT),format = "%Y-%m-%dT%H:%M:%OSZ")) %>% 
+  #select(offensegroup,offense.text,REPORT_DAT,SHIFT) %>% 
+  mutate(Month=month(REPORT_DAT)) %>% 
+  mutate(Week_day=wday(REPORT_DAT)) %>%
+  mutate(Year=year(REPORT_DAT)) %>%
+  mutate(Day=day(REPORT_DAT))
+  #select(LONGITUDE,LATITUDE,`offense.text`,SHIFT,Month,Week_day,Hour)
+```
+
+```{r}
+tidy_cirme %>% 
+  mutate(Month=ymd_hms(REPORT_DAT))
+```
+```{r}
+library(maps)                                  
+#https://github.com/benbalter/dc-maps/blob/master/maps/dc-boundary.geojson
+
+
+```
+
+```{r}
+
+ 
+
+```
+
+
+```{r}
+dc_b <- geojson_read("dcb.geojson",  what = "sp")
+
+
+
+tidycrime1<-tidy_cirme %>% 
+  filter(Month==1,SHIFT=="day",Week_day==4)
+
+
+leaflet(dc_b) %>%  
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  #addTiles() %>%
+  addPolygons(color = "#444444", weight = 1, smoothFactor = 0.5,
+    opacity = 1.0, fillOpacity = 0.0) %>% 
+  addMarkers(~tidycrime1$LONGITUDE,~tidycrime1$LATITUDE,label = ~tidycrime1$offense.text)
+
+```
+
+```{r}
+tidycrime1
+```
+
+```{r}
+dc_crime %>% 
+  mutate(REPORT_DAT=parse_datetime(as.character(dc_crime$REPORT_DAT),format = "%Y-%m-%dT%H:%M:%OSZ")) %>% 
+    mutate(Month=month(REPORT_DAT)) %>% 
+    mutate(Year=year(REPORT_DAT)) %>%
+  mutate(Week_day=wday(REPORT_DAT)) %>% 
+    group_by(Month,SHIFT,Week_day) %>% 
+    summarise(Total=n()) %>% 
+    mutate(Time=make_date(month = Month))->ana_t
+ana_t
+
+```
+
+```{r}
+
+time<-lm(Total~SHIFT*Week_day,data = ana_t)
+summary(time)
+```
+、
+```{r}
+  dc_crime %>% 
+    mutate(REPORT_DAT=parse_datetime(as.character(dc_crime$REPORT_DAT),format = "%Y-%m-%dT%H:%M:%OSZ")) %>% 
+    mutate(Month=month(REPORT_DAT)) %>% 
+    mutate(Year=year(REPORT_DAT)) %>%
+    mutate(Day=mday(REPORT_DAT)) %>%
+    group_by(Month) %>% 
+    summarise(Total=n()) %>% 
+    mutate(Time=make_date(month = Month))->ana_m
+  
+  output$mn_plot<-renderPlot(
+    {
+      ana_m %>% 
+        ggplot(mapping=aes(x=Month,y=Total))+
+        geom_point()+
+        theme_bw()+
+        geom_smooth(
+          method = lm,
+          se = FALSE,
+          color = "black",
+          linetype = "dashed"
+        )
+    }
+  )
+  output$mn_lm<-renderPrint(
+    {
+      m_m_n<-lm(Total~Month,data = ana_m)
+      summary(m_m_n)
+    }
+  )
+  
+  
+  output$dn_plot<-renderPlot(
+    {
+      dc_crime %>% 
+        mutate(REPORT_DAT=parse_datetime(as.character(dc_crime$REPORT_DAT),format = "%Y-%m-%dT%H:%M:%OSZ")) %>% 
+        mutate(Month=month(REPORT_DAT)) %>% 
+        mutate(Year=year(REPORT_DAT)) %>%
+        mutate(Day=mday(REPORT_DAT)) %>%
+        filter(Year!=2020) %>% 
+        ggplot(mapping = aes(x = DISTRICT, fill =
+                               as.factor(Year))) +
+        geom_bar(stat = "count",
+                 width = 0.7,
+                 position = 'dodge')+
+        labs(x = "DISTRICT", y = "Total Number", fill = "Year")+
+        theme_bw()
+    }
+  )
+  dc_crime %>% 
+    mutate(REPORT_DAT=parse_datetime(as.character(dc_crime$REPORT_DAT),format = "%Y-%m-%dT%H:%M:%OSZ")) %>% 
+    mutate(Month=month(REPORT_DAT)) %>% 
+    mutate(Year=year(REPORT_DAT)) %>%
+    mutate(Week_day=wday(REPORT_DAT)) %>% 
+    group_by(Month,SHIFT,Week_day) %>% 
+    summarise(Total=n()) %>% 
+    mutate(Time=make_date(month = Month))->ana_t
+  
+  output$tn_plot<-renderPlot(
+    {
+      ana_t %>% 
+        ggplot(mapping=aes(x=Week_day,y=Total,colour=SHIFT))+
+        geom_point()+
+        theme_bw()
+    }
+  )
+  
+  output$tn_lm<-renderPrint(
+    {
+      m_t_n<-lm(Total~SHIFT*Week_day,data = ana_t)
+      summary(m_t_n)
+    }
+  )
+```
+
+```{r}
+ dc_crime %>%
+    mutate(REPORT_DAT = parse_datetime(as.character(dc_crime$REPORT_DAT), format = "%Y-%m-%dT%H:%M:%OSZ")) %>%
+    mutate(Month = month(REPORT_DAT)) %>%
+    mutate(Year = year(REPORT_DAT)) %>%
+    mutate(Day = mday(REPORT_DAT)) %>%
+    group_by(Month,Year) %>%
+    summarise(Total = n()) %>%
+    #mutate(Time = make_date(month = Month)) %>% 
+  filter(Year!=2020)-> ana_m
+ana_m
+```
+```{r}
+ana_m %>%
+      ggplot(mapping = aes(x = Month, y = Total,)) +
+      geom_point() +
+      theme_bw() +
+      geom_smooth(mapping = aes(), method = lm, se = FALSE)+
+  facet_wrap(~ Year)
+```
+```{r}
+m_m_n <- lm(Total ~ Month+as.factor(Year), data = ana_m)
+    summary(m_m_n)
+```
+
