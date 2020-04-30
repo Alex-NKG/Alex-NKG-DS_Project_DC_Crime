@@ -1,0 +1,272 @@
+---
+title: "DC area criminal incident analysis"
+author: "Alex, \nBo, \nJingyi"
+date: "2020/4/26"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  word_document: default
+---
+
+```{r setup,include=FALSE}
+knitr::opts_chunk$set(warning=FALSE)
+```
+
+```{r ,include=FALSE}
+dc_crime<-read.csv("./dc_crimes_search_results.csv")
+library(tidyverse)
+dc_crime %>% 
+  mutate(offense.text=recode(offense.text, `assault w/dangerous weapon` ="assault")) ->dc_crime
+library(lubridate)
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(plotly)
+library(gganimate)
+library(broom)
+library(dplyr)
+library(car)
+library(MASS)
+
+```
+
+
+# 1. Introduction 
+
+Our project is criminal cases analyze in the DC area, in the project we hope we can explore the relationship between criminal case numbers and other possible predictor variables. By this topic, we hope to raise people’s awareness of public safety. Using all the data available from the Metropolitan Police Department, we can begin to understand how crime is evolving and understand whether local law enforcement is prioritizing the effective resources to address it.
+
+In this project, the main focus is exploring the question of what is the trend in the number of crimes changes from 2018 to 2019 in the DC area. Then we propose four hypotheses as the research framework. In detail, the hypotheses are  (1) Some types of crime’s number increased in 2019 than in 2018. (2) Due to Christmas Day and New Year, we think the total number of crimes may occur the most at the end of the year until the beginning of the next year(from November to January of the following year). (3) The month can affect the number of crimes. (4) Compared with the evening and day, there are more crimes at midnight.  
+
+Our team members are Yueyang Liu, Bo Wang, Jingyi Ge. Each of us did different jobs and completed the project together.  Yueyang is s responsible for collecting and tidying original data and producing the shiny app. Bo and Jingyi are responsible for report analysis. And study hypotheses together by all team members.
+
+
+
+# 2. About this data
+
+This data is published by the Metropolitan Police Department, which includes information on criminal cases that happened in the DC area. Data are presented for 2018 to Feb 2020. There are 29 variables in the data set. 
+```{r,echo=F}
+colnames(dc_crime)
+```
+Here is our data link which is convenient for everyone to download and use.
+https://drive.google.com/file/d/1gzomTXvi0qrqx7_jUOz7uurleJ_2KIZ0/view?usp=sharing
+
+# 3. Tidy data
+  
+First of all, we get the original data from the official website. Then we use ‘lubridate’ and ‘tidyverse’ packages to tidy our data. We also noticed that our data contains missing values, and therefore we dropped those “NA” rows so that we can make a clearer analysis. We generate data and time columns so that we can analyze the relationship between crime numbers and time/date. And to the crime time and location analysis, we use the Leaflet map.  
+The variables we used in the project are list below.
+```{r, include=FALSE}
+dc_crime %>% 
+  
+    mutate(REPORT_DAT=parse_datetime(as.character(dc_crime$REPORT_DAT),format = "%Y-%m-%dT%H:%M:%OSZ"))%>% 
+    mutate(Month=month(REPORT_DAT)) %>% 
+    mutate(Year=year(REPORT_DAT)) %>%
+    mutate(Day=mday(REPORT_DAT)) %>%
+    mutate(Hour=hour(REPORT_DAT)) %>% 
+    mutate(Time=make_date(year = Year,month = Month)) %>% 
+  filter(Year!=2020) %>% 
+  dplyr::select(-NEIGHBORHOOD_CLUSTER,-CENSUS_TRACT,-offensegroup,-END_DATE,-YBLOCK,-WARD,-offensekey,-BID,-PSA,-`ucr.rank`,-BLOCK_GROUP,-VOTING_PRECINCT,-XBLOCK,BLOCK,-location, -LONGITUDE, -BLOCK, -START_DATE, -CCN, -OCTO_RECORD_ID, -ANC, -METHOD, -LATITUDE, -OFFENSE)->tidy_dc
+
+```
+```{r,echo=FALSE}
+colnames(tidy_dc)
+```
+We also designed the shiny app to show our data, the link is listed below: https://alex-nkg.shinyapps.io/DC_Crime/
+
+```{r, include=FALSE}
+#crime number by sector
+dc_crime %>% 
+  group_by(sector) %>% 
+  summarise(n=n()) %>% 
+  filter(sector!='')->total_n 
+head(total_n)
+
+#crime number by sector and offense type
+dc_crime %>% 
+  group_by(sector,offense.text) %>% 
+  summarise(n=n()) %>% 
+  filter(sector!='') %>% 
+  spread(key ="offense.text", value = "n") %>% 
+  mutate(arson= replace_na(arson, 0))  ->split_n 
+head(split_n)
+```
+
+# 4. Analysis, visualization models  
+
+## 4.1 Crime trends from 2018 to 2019.
+
+### Hypothesis: Some types of crime number increased in 2019 than in 2018  
+
+We would like to compare crime data from 2018 to 2019. We grouped the data frame by offense type and year. Then use a ggplot to draw the bar plot respectively.
+
+This plot shows the comparison of the crime number between 2018 and 2019 by type:
+
+```{r, echo=FALSE}
+tidy_dc %>% 
+  
+  group_by(offense.text,Year) %>% 
+  
+  rename( Title = 'offense.text') %>% 
+  ggplot( mapping=aes(x=fct_rev(fct_infreq(Title)),fill=as.factor(Year)))+
+  geom_bar(stat="count",width=0.7,position='dodge')+
+  labs(x="",y="Total Number",fill = "Year") +
+  theme_bw()+
+  geom_text(stat='count',aes(label=..count..), color="black", size=3.5,position=position_dodge(width=1),vjust=0.7)+
+  coord_flip()+ theme(legend.position="bottom")
+```
+
+From the plot, we can confirm our first hypothesis as some specific type of crime cases increased slightly from 2018 to 2019, including theft and robbery. Meanwhile, auto theft and sex abuse cases decreased from 2018 to 2019, while other kinds of criminals remain steady in these 2 years.
+According to this estimation, we may say the public safety situation is improving.
+
+## 4.2 The relation between crimes and the month
+
+### Hypothesis: due to Christmas Day and New Year, we think the total number of crimes may occur the most at the end of the year until the beginning of the next year(from November to January of the following year).  
+We grouped the data frame by year and month and drew a scatter plot to exam the relationship between crime numbers and months.
+
+```{r, echo=FALSE}
+tidy_dc %>% 
+  group_by(Year,Month) %>% 
+  summarise(Total=n()) %>% 
+  #mutate(Time=make_date(year = Year,month = Month)) %>% 
+  ggplot(mapping = aes(x = as.factor(Month),y = Total)) + 
+    geom_point() + 
+    theme_bw() + 
+    xlab("Month") + 
+    ylab("Total Number") + 
+    ggtitle("Crime number in each month") + 
+  facet_wrap(~ Year)
+```
+
+According to this plot, we reject hypothesis 2, the crime number gradually increased from Feb and reached its peak point in August. Crimes occur the most between August and October.  
+
+From the result of hypothesis 2, we did a deeper study since we would like to figure out the relationship between the month and the number of crimes.  
+
+Going deeper, we developed a regression model for these two variables.  
+
+$Y_i= \beta_0+\beta_1X_{1}$  
+$\beta_0$ is the intercept on Y.  
+$\beta_1$ is the effect on Y(Total crime cases) for changes in X(month) given the other variables in the model.  
+
+```{r, echo=F}
+tidy_dc %>% 
+  group_by(Year,Month) %>% 
+  summarise(Total=n())->mvt
+crime_mn=lm(Total~Month,data=mvt)
+print("R^2:")
+summary(crime_mn)$r.squared
+print("P value:")
+summary(crime_mn)$coefficient[8]
+
+```
+
+We see the p-value is 6.732e-05, but the R-squared is only about 0.5217 which does not fit the model very well, we still need to optimize this model. From the plot the Jan’s data is far from other points, to figure it is an outlier or not we did the outlier test here.
+
+```{r, echo=FALSE}
+#outlier test
+outlierTest(crime_mn)
+```
+
+According to the outlier test, we can confirm that Jan’s data is an outlier data, but we still plan to keep this outlier since we don’t know how it will affect the data. We see a caved shape between the month and crime number in the plot, indicate that a transformation on the responses y is necessary.  
+To find the best $\lambda$, we apply the Box-Cox transformation to the responses Y:
+
+```{r, echo=FALSE}
+boxcox(crime_mn,lambda=seq(1,6,0.05))
+```
+according to the plot, we set $\lambda=3.2$ 
+```{r, echo=FALSE}
+r=mvt$Total^3.1 
+new_crime=lm(r~Month,data=mvt)
+print("R^2")
+summary(new_crime)$r.squared
+```
+The R-squared is 0.5699, which is better than the previous one.
+Now the model is:$Y^{3.1}=2.258e^{10}+4.283e^{09}X$  
+We also tired a piecewise function to fit the model.
+```{r, echo=FALSE}
+stage_fit<-lm (mvt$Total~  I(mvt$Month<=7) + 
+                 I((mvt$Month<=7)*mvt$Month)+
+                 I(mvt$Month>7) + 
+                 I((mvt$Month>7)*mvt$Month))
+print("R^2")
+summary(stage_fit)$r.squared
+```
+
+```{r, echo=FALSE}
+qplot(as.factor(mvt$Month),mvt$Total)+
+  geom_line(aes(mvt$Month, fitted.values(stage_fit)),colour=3)+
+  ggtitle("Crime number in each month") +
+  labs(x="Month",y="Crime Number")+
+  theme_bw()
+
+```
+
+In the piecewise function model, the R-squared value is 0.7139, and the p-value is small, we can accept that there is a piecewise linear relationship between the month and the crime number.  
+
+
+## 4.3 Crime numbers in different periods of time 
+
+### Hypothesis: Compared with the day and evening, there are more crimes at midnight.
+
+First, we grouped the data frame by the year and hour, and calculated the total number of the crimes, then use a scatter plot to show their distribution.
+
+```{r, echo=FALSE}
+tidy_dc %>% 
+  group_by(Year,Hour) %>% 
+  summarise(Total=n()) %>% 
+  #mutate(Time=make_date(year = Year,month = Month)) %>% 
+  ggplot(mapping = aes(x = as.factor(Hour),y = Total)) + 
+    geom_point() + 
+    theme_light() + 
+    xlab("Hour") + 
+    ylab("Crime Number") + 
+    ggtitle("Crime number in each hour") + 
+  facet_wrap(~ Year)
+```
+
+According to the point plot, we find that: compared with day, the crimes are more active at night. Thus, Later we will plot our data with only night cases.  
+In the original data frame, the `SHIFT` variable was set as day(11am - 7pm), evening(8pm - 3am), midnight(4am – 10am).  Then we use `filter` function to get rid of the day time value and use boxplot to compare the change in the total number of crimes at night and midnight every weekday.
+```{r, echo=FALSE}
+tidy_dc %>% mutate(Week_day=wday(REPORT_DAT)) %>%
+  group_by(Year, Month,SHIFT,Week_day, Year) %>%
+  na.omit() %>% 
+  summarise(n=n()) -> tidy_week
+tidy_week %>% 
+  filter(SHIFT!='day')%>%
+  ggplot(mapping=aes(x=as.factor(Week_day),y=n,colour=SHIFT))+
+  geom_boxplot()+
+  facet_wrap(~ Year)+
+  theme_bw()+
+  xlab("Week_day")+
+  ylab("Total Number") + theme(legend.position="bottom")
+```
+
+According to the plot we find there are more crimes in the evening than at midnight. Thus, we will reject our hypothesis 4.  
+Residents can be reminded that there are more thieves during that time, and law enforcement agencies need to maintain sufficient workforces at night to cope with the criminal acts.  
+
+# Conclusion
+
+After further study, we can draw a conclusion of the what tendency of the crime change from 2018 to 2019 in the DC area is.  
+(1)The first hypothesis is some types of criminal cases increased in 2019 than in 2018, and we have proven it is true. The theft and robbery increased slightly from 2018 to 2019.  
+(2) When mentioning the month and the crimes. Our second hypothesis is due to Christmas Day and New Year, we think the total number of crimes may occur the most at the end of the year until the beginning of the next year(from November to January of the following year). However, we have to reject the hypothesis. The period of the crimes occurs the most is from August to October. After analysis, we think the month can affect the number of crimes. We take January as outliers, then use a piecewise function to fit the linear model. Finally, we accept the hypothesis that there is a piecewise linear relationship between the month and the crime number.  
+(3) In common idea, criminal cases likely happen during the period from midnight time to dawn, when people are usually sleepy and tired.  Our hypothesis is compared with the evening, and there are more crimes at midnight. However, according to the plot, we reject our last hypothesis. The crimes are more active in the evening rather than midnight.  
+
+In summary, through this project, we want to show people that Building on DC’s public safety improvements will take more than policing alone, we need a holistic approach that involves social services, the police, nonprofits, and residents working together, only through collaboration can the city build safer communities—creating the social supports, stability, and opportunities that will bring down even the most persistent pockets of violent crime.  
+
+
+# Limitation
+
+We have only found the data for 2018 and 2019, and if we can get more data, we may able to do the time series data mining. The original data doesn't include the population distribution in each area; we cannot study the relationship between the number of crimes and the number of people, and cannot determine the crime rate. There is still has biases in the original data frame, the division of day and night and midnight is different from the common sense which may affect our hypothesis judgment.  
+
+
+# Reference
+https://mpdc.dc.gov/page/district-crime-data-glance
+
+Moore,H.M., & Trojanowicz,C.R.(1988). Policing and the Fear of Crime. U.S. Department of Justice. No.3
+https://www.ncjrs.gov/pdffiles1/nij/111459.pdf
+
+# Session Info
+```{r}
+sessionInfo()
+```
+
+
+
