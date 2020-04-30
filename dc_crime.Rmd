@@ -14,9 +14,14 @@ library(tidyverse)
 
 ```{r}
 dc_crime<-read.csv("dc_crimes_search_results.csv")
-dc_crime %>% 
-  filter(`offense.text`=="homicide")
+dc_crime
+
 ```
+```{r}
+dc_crime %>% 
+  mutate(offense.text=recode(offense.text, `assault w/dangerous weapon` = "assault"))
+```
+
 ```{r}
 unique(dc_crime$offense.text)
 ```
@@ -324,9 +329,7 @@ leaflet(dc_b) %>%
 
 ```
 
-```{r}
-tidycrime1
-```
+
 
 ```{r}
 dc_crime %>% 
@@ -445,5 +448,30 @@ ana_m %>%
 ```{r}
 m_m_n <- lm(Total ~ Month+as.factor(Year), data = ana_m)
     summary(m_m_n)
+```
+
+```{r}
+      dc_crime %>%
+      mutate(REPORT_DAT = parse_datetime(as.character(dc_crime$START_DATE), format = "%Y-%m-%dT%H:%M:%OS")) %>%
+      mutate(Month = month(REPORT_DAT)) %>%
+      mutate(Year = year(REPORT_DAT)) %>%
+      mutate(Day = mday(REPORT_DAT)) %>%
+      mutate(Hour = hour(REPORT_DAT)) %>%
+      filter(Year == 2018) %>% 
+
+      group_by(offense.text,Month) 
+      
+```
+
+```{r}
+dc_crime %>% 
+   mutate(REPORT_DAT = parse_datetime(as.character(dc_crime$REPORT_DAT), format = "%Y-%m-%dT%H:%M:%OSZ")) %>%
+    mutate(Month = month(REPORT_DAT)) %>%
+    mutate(Year = year(REPORT_DAT)) %>%
+    mutate(weekday = wday(REPORT_DAT)) %>%
+  
+    group_by(Year,Month,weekday) %>%
+    summarise(Total = n()) %>%
+    ggplot(aes(as.factor(weekday), Total)) + geom_boxplot()
 ```
 
